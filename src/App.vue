@@ -1,15 +1,15 @@
 <template>
   <div>
-    <h1>Control Rifa Navidad 2025</h1>
+    <h1>Control Rifa Navidad 2026</h1>
 
     <!-- Hidden iframe for invisible submission -->
     <iframe name="submitFrame" style="display: none"></iframe>
 
     <!-- Hidden form targeting the iframe -->
     <form :action="scriptUrl" method="POST" target="submitFrame" ref="formRef">
-      <input type="hidden" name="userName" v-model="userName" />
-      <input type="hidden" name="userId" v-model="userId" />
+      <input type="hidden" name="sheetName" v-model="selectedSheet" />
       <input type="hidden" name="dateOfPayment" v-model="dateOfPayment" />
+      <input type="hidden" name="reference" v-model="reference" />
       <input type="hidden" name="quantity" v-model="quantity" />
       <input type="hidden" name="amount" v-model="amount" />
     </form>
@@ -17,51 +17,61 @@
     <!-- Visible Vue inputs -->
     <div class="form-container">
       <div class="input-group">
-        <label for="userName">Nombre:</label>
-        <input
-          id="userName"
-          v-model="userName"
-          type="text"
+        <label for="sheetName">Nombre:</label>
+        <select
+          id="sheetName"
+          v-model="selectedSheet"
           required
-          @blur="userNameTouched = true"
-        />
-        <span class="error" v-if="userNameError">{{ userNameError }}</span>
-      </div>
-
-      <div class="input-group">
-        <label for="userId">Número de talonario:</label>
-        <input
-          id="userId"
-          v-model.number="userId"
-          type="number"
-          required
-          @blur="userIdTouched = true"
-        />
-        <span class="error" v-if="userIdError">{{ userIdError }}</span>
+          :disabled="sheetOptionsLoading"
+          @blur="selectedSheetTouched = true"
+        >
+          <option value="" disabled>
+            {{ sheetOptionsLoading ? 'Cargando...' : 'Selecciona un nombre' }}
+          </option>
+          <option v-for="name in sheetOptions" :key="name" :value="name">
+            {{ name }}
+          </option>
+        </select>
+        <span class="error" v-if="selectedSheetError">{{ selectedSheetError }}</span>
+        <span class="error" v-if="sheetOptionsError">{{ sheetOptionsError }}</span>
       </div>
 
       <div class="input-group">
         <label for="dateOfPayment">Fecha del pago (DD/MM):</label>
         <input
           id="dateOfPayment"
-          v-model="dateInputFormatted"
+          :value="dateInput"
           type="text"
           placeholder="DD/MM"
           required
+          @input="onDateInput"
           @blur="dateTouched = true"
         />
         <span class="error" v-if="dateError">{{ dateError }}</span>
       </div>
 
       <div class="input-group">
+        <label for="reference">Referencia:</label>
+        <input
+          id="reference"
+          :value="reference"
+          type="text"
+          inputmode="numeric"
+          placeholder="0000"
+          @input="onReferenceInput"
+        />
+      </div>
+
+      <div class="input-group">
         <label for="amount">Monto:</label>
         <input
           id="amount"
-          v-model.number="amount"
-          type="number"
-          min="0"
-          step="0.01"
+          :value="amountDisplay"
+          type="text"
+          inputmode="numeric"
+          placeholder="0"
           required
+          @input="onAmountInput"
           @blur="amountTouched = true"
         />
         <span class="error" v-if="amountError">{{ amountError }}</span>
@@ -71,10 +81,12 @@
         <label for="quantity">Cantidad de números:</label>
         <input
           id="quantity"
-          v-model.number="quantity"
-          type="number"
-          min="1"
+          :value="quantityDisplay"
+          type="text"
+          inputmode="decimal"
+          placeholder="ej. 3,5"
           required
+          @input="onQuantityInput"
           @blur="quantityTouched = true"
         />
         <span class="error" v-if="quantityError">{{ quantityError }}</span>
@@ -86,46 +98,142 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
-const userName = ref('')
-const userId = ref(0)
+const selectedSheet = ref('')
 const dateOfPayment = ref('')
 const dateInput = ref('')
+const reference = ref('')
 const quantity = ref(0)
 const amount = ref(0)
 
-const userNameTouched = ref(false)
-const userIdTouched = ref(false)
+const sheetOptions = ref<string[]>([])
+const sheetOptionsLoading = ref(true)
+const sheetOptionsError = ref('')
+
+const selectedSheetTouched = ref(false)
 const dateTouched = ref(false)
 const amountTouched = ref(false)
 const quantityTouched = ref(false)
 
 // Your deployed Apps Script URL
 const scriptUrl =
-  'https://script.google.com/macros/s/AKfycbzyJkLPx4FKgig3mzrwUZOT81AjawwqJ23BQdkXOkTpbyWfj7QkoGOY1pFWb2922LNL0w/exec'
+  'https://script.google.com/macros/s/AKfycbz1VBWhAvl0UE0MkD8hgptgb1FuHrpjJlhwgVt-gJVnqyBDmarwLq3goNawDhRxaPwl/exec'
 const formRef = ref<HTMLFormElement>()
 
-const dateInputFormatted = computed({
-  get: () => dateInput.value,
-  set: (value) => {
-    let cleaned = value.replace(/\D/g, '').slice(0, 4)
-    if (cleaned.length >= 2) {
-      cleaned = cleaned.slice(0, 2) + '/' + cleaned.slice(2)
+// Apps Script doesn't send CORS headers on doGet, so a plain fetch() gets
+// blocked by the browser. We load the sheet list via JSONP instead: a
+// <script> tag isn't subject to CORS.
+function fetchSheetNamesJsonp(): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const callbackName = `sheetNamesCallback_${Date.now()}`
+    const script = document.createElement('script')
+    const timeoutId = setTimeout(() => {
+      cleanup()
+      reject(new Error('Tiempo de espera agotado'))
+    }, 10000)
+
+    const cleanup = () => {
+      clearTimeout(timeoutId)
+      delete (window as unknown as Record<string, unknown>)[callbackName]
+      script.remove()
     }
-    dateInput.value = cleaned
-  },
+
+    ;(window as unknown as Record<string, unknown>)[callbackName] = (data: {
+      result: string
+      sheets?: string[]
+    }) => {
+      cleanup()
+      if (data.result === 'success' && Array.isArray(data.sheets)) {
+        resolve(data.sheets)
+      } else {
+        reject(new Error('Respuesta inválida'))
+      }
+    }
+
+    script.src = `${scriptUrl}?callback=${callbackName}`
+    script.onerror = () => {
+      cleanup()
+      reject(new Error('No se pudo cargar el script'))
+    }
+    document.body.appendChild(script)
+  })
+}
+
+onMounted(async () => {
+  try {
+    sheetOptions.value = await fetchSheetNamesJsonp()
+  } catch {
+    sheetOptionsError.value = 'No se pudo cargar la lista de nombres'
+  } finally {
+    sheetOptionsLoading.value = false
+  }
 })
 
-const userNameError = computed(() =>
-  !userNameTouched.value ? '' : userName.value.trim() === '' ? 'Nombre requerido' : '',
-)
-const userIdError = computed(() =>
-  !userIdTouched.value
-    ? ''
-    : userId.value <= 0 || userId.value >= 100
-      ? 'Número de talonario debe ser entre 1 y 99'
-      : '',
+// Masked inputs force the cleaned value back onto the DOM element directly
+// (instead of relying on v-model's reactive diffing): if noisy input happens
+// to clean up to the same underlying value already stored (e.g. typing
+// "3a,,5b6c" when the field already holds 3,5), Vue sees no change and skips
+// re-rendering, leaving the raw uncleaned text stuck on screen.
+function cleanDate(raw: string): string {
+  let cleaned = raw.replace(/\D/g, '').slice(0, 4)
+  if (cleaned.length >= 2) {
+    cleaned = cleaned.slice(0, 2) + '/' + cleaned.slice(2)
+  }
+  return cleaned
+}
+function onDateInput(event: Event) {
+  const target = event.target as HTMLInputElement
+  const cleaned = cleanDate(target.value)
+  dateInput.value = cleaned
+  target.value = cleaned
+}
+
+function cleanReference(raw: string): string {
+  return raw.replace(/\D/g, '').slice(0, 4)
+}
+function onReferenceInput(event: Event) {
+  const target = event.target as HTMLInputElement
+  const cleaned = cleanReference(target.value)
+  reference.value = cleaned
+  target.value = cleaned
+}
+
+// No decimals while typing on purpose: forcing a fake ",00" suffix would
+// inject extra digit characters that get swept up by the next keystroke's
+// digit filter, corrupting the number (e.g. typing "1" then "2" would read
+// back "1002" instead of "12"). The sheet's cell format adds the ",00" for
+// the final accounting-style display.
+function formatAmount(value: number): string {
+  return value === 0 ? '' : value.toLocaleString('es-CL')
+}
+const amountDisplay = computed(() => formatAmount(amount.value))
+function onAmountInput(event: Event) {
+  const target = event.target as HTMLInputElement
+  const digits = target.value.replace(/\D/g, '')
+  amount.value = digits === '' ? 0 : parseInt(digits, 10)
+  target.value = formatAmount(amount.value)
+}
+
+function cleanQuantity(raw: string): string {
+  let cleaned = raw.replace(/[^\d,]/g, '')
+  const commaIndex = cleaned.indexOf(',')
+  if (commaIndex !== -1) {
+    cleaned =
+      cleaned.slice(0, commaIndex + 1) + cleaned.slice(commaIndex + 1).replace(/,/g, '').slice(0, 1)
+  }
+  return cleaned
+}
+const quantityDisplay = computed(() => (quantity.value === 0 ? '' : String(quantity.value).replace('.', ',')))
+function onQuantityInput(event: Event) {
+  const target = event.target as HTMLInputElement
+  const cleaned = cleanQuantity(target.value)
+  quantity.value = cleaned === '' || cleaned === ',' ? 0 : parseFloat(cleaned.replace(',', '.'))
+  target.value = cleaned
+}
+
+const selectedSheetError = computed(() =>
+  !selectedSheetTouched.value ? '' : selectedSheet.value === '' ? 'Selecciona un nombre' : '',
 )
 const dateError = computed(() => {
   if (!dateTouched.value) return ''
@@ -145,14 +253,7 @@ const quantityError = computed(() =>
 )
 
 const isFormValid = computed(() => {
-  if (
-    userName.value.trim() === '' ||
-    userId.value <= 0 ||
-    userId.value >= 100 ||
-    amount.value <= 0 ||
-    quantity.value <= 0
-  )
-    return false
+  if (selectedSheet.value === '' || amount.value <= 0 || quantity.value <= 0) return false
 
   const dateRegex = /^\d{2}\/\d{2}$/
   if (!dateRegex.test(dateInput.value)) return false
@@ -171,7 +272,7 @@ const submitForm = () => {
     const [dayRaw, monthRaw] = parts
     const day = dayRaw?.padStart(2, '0')
     const month = monthRaw?.padStart(2, '0')
-    dateOfPayment.value = `2025-${month}-${day}`
+    dateOfPayment.value = `2026-${month}-${day}`
 
     // Update the hidden input manually
     const dateInputEl = formRef.value?.querySelector<HTMLInputElement>(
@@ -184,17 +285,14 @@ const submitForm = () => {
   formRef.value?.submit()
   alert('Datos enviados correctamente!')
 
-  // Reset form
-  userName.value = ''
-  userId.value = 0
+  // Reset form (keep selectedSheet so multiple payments for the same person are quick to log)
   dateInput.value = ''
   dateOfPayment.value = ''
+  reference.value = ''
   amount.value = 0
   quantity.value = 0
 
   // Reset touched states
-  userNameTouched.value = false
-  userIdTouched.value = false
   dateTouched.value = false
   amountTouched.value = false
   quantityTouched.value = false
@@ -258,7 +356,8 @@ label {
   color: #555;
 }
 
-input {
+input,
+select {
   padding: 1rem 0.75rem;
   border: 2px solid #e1e5e9;
   border-radius: 8px;
@@ -269,7 +368,8 @@ input {
   background: #f8f9fa;
 }
 
-input:focus {
+input:focus,
+select:focus {
   outline: none;
   border-color: #667eea;
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
@@ -338,7 +438,8 @@ button:disabled {
     padding: 1.5rem;
     border-radius: 8px;
   }
-  input {
+  input,
+  select {
     padding: 0.875rem 0.625rem;
     font-size: 0.95rem;
   }
@@ -361,7 +462,8 @@ button:disabled {
     padding: 1rem;
     border-radius: 6px;
   }
-  input {
+  input,
+  select {
     padding: 0.75rem 0.5rem;
     font-size: 0.9rem;
   }
@@ -386,7 +488,8 @@ button:disabled {
     padding: 0.75rem;
     margin: 0.5rem;
   }
-  input {
+  input,
+  select {
     padding: 0.75rem 0.5rem;
     font-size: 0.85rem;
     border-radius: 6px;
