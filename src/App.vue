@@ -33,7 +33,10 @@
           </option>
         </select>
         <span class="error" v-if="selectedSheetError">{{ selectedSheetError }}</span>
-        <span class="error" v-if="sheetOptionsError">{{ sheetOptionsError }}</span>
+        <span class="error" v-if="sheetOptionsError">
+          {{ sheetOptionsError }}
+          <button type="button" class="retry-link" @click="loadSheetOptions">Reintentar</button>
+        </span>
       </div>
 
       <div class="input-group">
@@ -123,15 +126,16 @@ const formRef = ref<HTMLFormElement>()
 
 // Apps Script doesn't send CORS headers on doGet, so a plain fetch() gets
 // blocked by the browser. We load the sheet list via JSONP instead: a
-// <script> tag isn't subject to CORS.
+// <script> tag isn't subject to CORS. Timeout is generous (25s) because
+// some users are on slow/high-latency connections to script.google.com.
 function fetchSheetNamesJsonp(): Promise<string[]> {
   return new Promise((resolve, reject) => {
-    const callbackName = `sheetNamesCallback_${Date.now()}`
+    const callbackName = `sheetNamesCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`
     const script = document.createElement('script')
     const timeoutId = setTimeout(() => {
       cleanup()
       reject(new Error('Tiempo de espera agotado'))
-    }, 10000)
+    }, 25000)
 
     const cleanup = () => {
       clearTimeout(timeoutId)
@@ -160,15 +164,28 @@ function fetchSheetNamesJsonp(): Promise<string[]> {
   })
 }
 
-onMounted(async () => {
-  try {
-    sheetOptions.value = await fetchSheetNamesJsonp()
-  } catch {
-    sheetOptionsError.value = 'No se pudo cargar la lista de nombres'
-  } finally {
-    sheetOptionsLoading.value = false
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function loadSheetOptions() {
+  sheetOptionsLoading.value = true
+  sheetOptionsError.value = ''
+
+  const attempts = 3
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      sheetOptions.value = await fetchSheetNamesJsonp()
+      sheetOptionsLoading.value = false
+      return
+    } catch {
+      if (attempt < attempts) await sleep(1500)
+    }
   }
-})
+
+  sheetOptionsError.value = 'No se pudo cargar la lista de nombres'
+  sheetOptionsLoading.value = false
+}
+
+onMounted(loadSheetOptions)
 
 // Masked inputs force the cleaned value back onto the DOM element directly
 // (instead of relying on v-model's reactive diffing): if noisy input happens
@@ -382,6 +399,19 @@ select:focus {
   margin-top: 0.25rem;
   display: block;
   font-weight: 500;
+}
+
+.retry-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 0.25rem;
+  color: #667eea;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+  box-shadow: none;
 }
 
 button {
