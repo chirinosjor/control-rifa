@@ -71,8 +71,8 @@
           id="amount"
           :value="amountDisplay"
           type="text"
-          inputmode="numeric"
-          placeholder="0"
+          inputmode="decimal"
+          placeholder="ej. 1200,22"
           required
           @input="onAmountInput"
           @blur="amountTouched = true"
@@ -121,7 +121,7 @@ const quantityTouched = ref(false)
 
 // Your deployed Apps Script URL
 const scriptUrl =
-  'https://script.google.com/macros/s/AKfycbw780DFImTVAsBCCrAX9dUgkg6nDdVOnLCJsmFNBsSwPXqypsvSIMJ1knb9LztsEHpO/exec'
+  'https://script.google.com/macros/s/AKfycbzT9McBHM4taImiQHAFZKrEkjoGewqKrLIGu8NYBFoemsl84CKPfclrNXBwZBQfctRN/exec'
 const formRef = ref<HTMLFormElement>()
 
 // Apps Script doesn't send CORS headers on doGet, so a plain fetch() gets
@@ -216,20 +216,29 @@ function onReferenceInput(event: Event) {
   target.value = cleaned
 }
 
-// No decimals while typing on purpose: forcing a fake ",00" suffix would
-// inject extra digit characters that get swept up by the next keystroke's
-// digit filter, corrupting the number (e.g. typing "1" then "2" would read
-// back "1002" instead of "12"). The sheet's cell format adds the ",00" for
-// the final accounting-style display.
-function formatAmount(value: number): string {
-  return value === 0 ? '' : value.toLocaleString('es-CL')
-}
-const amountDisplay = computed(() => formatAmount(amount.value))
+// No forced decimals while the field is untouched/reset: showing a fake
+// ",00" would inject extra digit characters that the next keystroke's
+// digit filter would sweep up, corrupting the number (typing "1" then "2"
+// would read back "1002" instead of "12"). Once the user types a comma,
+// the real decimal digits they typed are shown as-is (up to 2), so no
+// fake digits are ever introduced. The sheet's cell format still forces
+// the final accounting-style ",00" display.
+const amountDisplay = computed(() =>
+  amount.value === 0 ? '' : amount.value.toLocaleString('es-CL', { maximumFractionDigits: 2 }),
+)
 function onAmountInput(event: Event) {
   const target = event.target as HTMLInputElement
-  const digits = target.value.replace(/\D/g, '')
-  amount.value = digits === '' ? 0 : parseInt(digits, 10)
-  target.value = formatAmount(amount.value)
+  const cleaned = target.value.replace(/[^\d,]/g, '')
+  const commaIndex = cleaned.indexOf(',')
+  const intPart = commaIndex === -1 ? cleaned : cleaned.slice(0, commaIndex)
+  const decPart = commaIndex === -1 ? '' : cleaned.slice(commaIndex + 1).replace(/,/g, '').slice(0, 2)
+
+  amount.value =
+    intPart === '' && decPart === '' ? 0 : parseFloat(`${intPart || '0'}.${decPart || '0'}`)
+
+  const groupedInt =
+    intPart === '' ? (commaIndex !== -1 ? '0' : '') : parseInt(intPart, 10).toLocaleString('es-CL')
+  target.value = commaIndex !== -1 ? `${groupedInt},${decPart}` : groupedInt
 }
 
 function cleanQuantity(raw: string): string {

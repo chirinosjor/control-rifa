@@ -78,6 +78,11 @@ function handleSubmission(e) {
   if (totalRowIndex !== -1) sheet.insertRowBefore(insertRow);
 
   sheet.getRange(insertRow, 1, 1, newRow.length).setValues([newRow]);
+  // insertRowBefore can copy formatting (bold, number format) from the row
+  // it displaces — reset the data row explicitly so only the Total row
+  // below ends up styled.
+  sheet.getRange(insertRow, 1, 1, newRow.length).setFontWeight('normal');
+  sheet.getRange(insertRow, 4).setNumberFormat('@').setValue(referencia); // columna D = Ref., como texto plano (evita "1234,00")
   sheet.getRange(insertRow, 5).setNumberFormat('#,##0.00'); // columna E = Monto, ej. 1.200,00
   sheet.getRange(insertRow, 6).setNumberFormat('0.#'); // columna F = Cant. Nums, ej. 3,5 (o 1 sin decimales)
   setCheckbox(sheet, insertRow);
