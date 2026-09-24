@@ -118,7 +118,7 @@ const quantityTouched = ref(false)
 
 // Your deployed Apps Script URL
 const scriptUrl =
-  'https://script.google.com/macros/s/AKfycbz1VBWhAvl0UE0MkD8hgptgb1FuHrpjJlhwgVt-gJVnqyBDmarwLq3goNawDhRxaPwl/exec'
+  'https://script.google.com/macros/s/AKfycbw780DFImTVAsBCCrAX9dUgkg6nDdVOnLCJsmFNBsSwPXqypsvSIMJ1knb9LztsEHpO/exec'
 const formRef = ref<HTMLFormElement>()
 
 // Apps Script doesn't send CORS headers on doGet, so a plain fetch() gets

@@ -63,11 +63,12 @@ function handleSubmission(e) {
   ];
 
   const lastRow = sheet.getLastRow();
-  const nombreValues = lastRow > 1 ? sheet.getRange(2, 1, lastRow - 1).getValues() : [];
+  // "Total" lives in column D (Ref.), not column A (Nombre) — see e.g. "1 XIOMARA".
+  const refValues = lastRow > 1 ? sheet.getRange(2, 4, lastRow - 1, 1).getValues() : [];
 
   let totalRowIndex = -1;
-  for (let i = 0; i < nombreValues.length; i++) {
-    if (String(nombreValues[i][0]).trim().toLowerCase() === 'total') {
+  for (let i = 0; i < refValues.length; i++) {
+    if (String(refValues[i][0]).trim().toLowerCase() === 'total') {
       totalRowIndex = i + 2; // +2: 1-indexed rows + header offset
       break;
     }
@@ -80,6 +81,17 @@ function handleSubmission(e) {
   sheet.getRange(insertRow, 5).setNumberFormat('#,##0.00'); // columna E = Monto, ej. 1.200,00
   sheet.getRange(insertRow, 6).setNumberFormat('0.#'); // columna F = Cant. Nums, ej. 3,5 (o 1 sin decimales)
   setCheckbox(sheet, insertRow);
+
+  // Keep (or create) a "Total" row right after the data, with SUM formulas
+  // that always cover rows 2..insertRow — self-heals any stale range and
+  // means a sheet never needs a Total row set up by hand.
+  const totalRow = insertRow + 1;
+  sheet.getRange(totalRow, 4).setValue('Total');
+  sheet.getRange(totalRow, 5).setFormula(`=SUM(E2:E${insertRow})`);
+  sheet.getRange(totalRow, 5).setNumberFormat('#,##0.00');
+  sheet.getRange(totalRow, 6).setFormula(`=SUM(F2:F${insertRow})`);
+  sheet.getRange(totalRow, 6).setNumberFormat('0.#');
+  sheet.getRange(totalRow, 4, 1, 3).setFontWeight('bold');
 
   return jsonResponse({ result: 'success', sheet: sheet.getName() });
 }
